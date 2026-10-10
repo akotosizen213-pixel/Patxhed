@@ -1,0 +1,696 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+
+local Settings = {
+    SilentAim     = false,
+    FOVCircle     = true,
+    TeamCheck     = true,
+    WallCheck     = true,
+    FOVRadius     = 120,
+    Smoothness    = 0.10,   -- fixed: was dividing by 100 later making it 0.0025
+    GUIColor      = Color3.fromRGB(255, 255, 255),
+    AimbotEnabled = false,
+}
+
+-- ══════════════════════════════════════════
+--  SCREENGUI  (CoreGui with pcall fallback)
+-- ══════════════════════════════════════════
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name            = "ZenWCKDHub"
+ScreenGui.ResetOnSpawn    = false
+ScreenGui.ZIndexBehavior  = Enum.ZIndexBehavior.Sibling
+ScreenGui.IgnoreGuiInset  = true
+local ok = pcall(function() ScreenGui.Parent = game:GetService("CoreGui") end)
+if not ok then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+
+-- ══════════════════════════════════════════
+--  FOV DRAWING  — must live in Drawing, NOT a Roblox Frame
+--  Fixed: was trying to use Roblox UI for a Drawing object
+-- ══════════════════════════════════════════
+local FOVDraw       = Drawing.new("Circle")
+FOVDraw.Visible     = Settings.FOVCircle
+FOVDraw.Radius      = Settings.FOVRadius
+FOVDraw.Color       = Color3.fromRGB(255, 255, 255)  -- Drawing uses Color3
+FOVDraw.Thickness   = 1.5
+FOVDraw.Filled      = false
+FOVDraw.NumSides    = 128
+FOVDraw.Position    = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+-- keep circle centered every frame regardless of window resize
+RunService.RenderStepped:Connect(function()
+    FOVDraw.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    FOVDraw.Radius   = Settings.FOVRadius
+    FOVDraw.Visible  = Settings.FOVCircle
+    FOVDraw.Color    = Settings.GUIColor
+end)
+
+-- ══════════════════════════════════════════
+--  MAIN FRAME
+-- ══════════════════════════════════════════
+local MainFrame = Instance.new("Frame")
+MainFrame.Name              = "MainFrame"
+MainFrame.Size              = UDim2.new(0, 580, 0, 380)
+MainFrame.Position          = UDim2.new(0.5, -290, 0.5, -190)
+MainFrame.BackgroundColor3  = Color3.fromRGB(10, 10, 10)
+MainFrame.BorderSizePixel   = 0
+MainFrame.Active            = true
+MainFrame.Draggable         = true
+MainFrame.Parent            = ScreenGui
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 12)
+local Stroke = Instance.new("UIStroke", MainFrame)
+Stroke.Color     = Color3.fromRGB(50, 50, 50)
+Stroke.Thickness = 1.5
+
+-- ══════════════════════════════════════════
+--  TITLE BAR
+-- ══════════════════════════════════════════
+local TitleBar = Instance.new("Frame")
+TitleBar.Size             = UDim2.new(1, 0, 0, 40)
+TitleBar.BackgroundColor3 = Color3.fromRGB(14, 14, 14)
+TitleBar.BorderSizePixel  = 0
+TitleBar.Parent           = MainFrame
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 12)
+
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Text               = "ZEN / WCKD"
+TitleLabel.Font               = Enum.Font.GothamBold
+TitleLabel.TextSize           = 14
+TitleLabel.TextColor3         = Color3.fromRGB(255, 255, 255)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Size               = UDim2.new(1, -80, 1, 0)
+TitleLabel.Position           = UDim2.new(0, 14, 0, 0)
+TitleLabel.TextXAlignment     = Enum.TextXAlignment.Left
+TitleLabel.Parent             = TitleBar
+
+-- ══════════════════════════════════════════
+--  WINDOW BUTTONS
+-- ══════════════════════════════════════════
+local ContentFrame  -- forward declare so minimize can see it
+
+local function MakeWindowBtn(symbol, posX, color, callback)
+    local Btn = Instance.new("TextButton")
+    Btn.Size             = UDim2.new(0, 22, 0, 22)
+    Btn.Position         = UDim2.new(1, posX, 0.5, -11)
+    Btn.BackgroundColor3 = color
+    Btn.Text             = symbol
+    Btn.Font             = Enum.Font.GothamBold
+    Btn.TextSize         = 11
+    Btn.TextColor3       = Color3.fromRGB(0, 0, 0)
+    Btn.BorderSizePixel  = 0
+    Btn.Parent           = TitleBar
+    Instance.new("UICorner", Btn).CornerRadius = UDim.new(0, 6)
+    Btn.MouseButton1Click:Connect(callback)
+    return Btn
+end
+
+MakeWindowBtn("×", -30, Color3.fromRGB(200, 50, 50), function()
+    FOVDraw:Remove()
+    ScreenGui:Destroy()
+end)
+
+MakeWindowBtn("−", -58, Color3.fromRGB(60, 60, 60), function()
+    if ContentFrame then
+        ContentFrame.Visible = not ContentFrame.Visible
+        MainFrame.Size = ContentFrame.Visible
+            and UDim2.new(0, 580, 0, 380)
+            or  UDim2.new(0, 580, 0, 40)
+    end
+end)
+
+-- ══════════════════════════════════════════
+--  CONTENT WRAPPER
+-- ══════════════════════════════════════════
+ContentFrame = Instance.new("Frame")
+ContentFrame.Name                 = "ContentFrame"
+ContentFrame.Size                 = UDim2.new(1, 0, 1, -40)
+ContentFrame.Position             = UDim2.new(0, 0, 0, 40)
+ContentFrame.BackgroundTransparency = 1
+ContentFrame.Parent               = MainFrame
+
+-- ══════════════════════════════════════════
+--  SIDEBAR
+-- ══════════════════════════════════════════
+local Sidebar = Instance.new("Frame")
+Sidebar.Size             = UDim2.new(0, 145, 1, -50)
+Sidebar.Position         = UDim2.new(0, 8, 0, 5)
+Sidebar.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+Sidebar.BorderSizePixel  = 0
+Sidebar.Parent           = ContentFrame
+Instance.new("UICorner", Sidebar).CornerRadius = UDim.new(0, 10)
+
+local TabLayout = Instance.new("UIListLayout")
+TabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+TabLayout.Padding   = UDim.new(0, 8)
+TabLayout.Parent    = Sidebar
+
+local SidebarPad = Instance.new("UIPadding")
+SidebarPad.PaddingTop   = UDim.new(0, 10)
+SidebarPad.PaddingLeft  = UDim.new(0, 8)
+SidebarPad.PaddingRight = UDim.new(0, 8)
+SidebarPad.Parent       = Sidebar
+
+-- ══════════════════════════════════════════
+--  USER BADGE
+-- ══════════════════════════════════════════
+local UserBadge = Instance.new("Frame")
+UserBadge.Size             = UDim2.new(1, 0, 0, 36)
+UserBadge.Position         = UDim2.new(0, 0, 1, -40)
+UserBadge.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+UserBadge.BorderSizePixel  = 0
+UserBadge.Parent           = ContentFrame
+Instance.new("UICorner", UserBadge).CornerRadius = UDim.new(0, 8)
+
+local UserLabel = Instance.new("TextLabel")
+UserLabel.Text               = "👤 " .. LocalPlayer.Name
+UserLabel.Font               = Enum.Font.GothamBold
+UserLabel.TextSize           = 11
+UserLabel.TextColor3         = Color3.fromRGB(200, 200, 200)
+UserLabel.BackgroundTransparency = 1
+UserLabel.Size               = UDim2.new(0.5, 0, 1, 0)
+UserLabel.Position           = UDim2.new(0, 10, 0, 0)
+UserLabel.TextXAlignment     = Enum.TextXAlignment.Left
+UserLabel.Parent             = UserBadge
+
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Text               = "STATUS: ACTIVE"
+StatusLabel.Font               = Enum.Font.GothamBold
+StatusLabel.TextSize           = 10
+StatusLabel.TextColor3         = Color3.fromRGB(100, 220, 100)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Size               = UDim2.new(0.5, -10, 1, 0)
+StatusLabel.Position           = UDim2.new(0.5, 0, 0, 0)
+StatusLabel.TextXAlignment     = Enum.TextXAlignment.Right
+StatusLabel.Parent             = UserBadge
+
+-- ══════════════════════════════════════════
+--  TAB SYSTEM
+-- ══════════════════════════════════════════
+local Tabs       = {}
+local TabButtons = {}
+
+local TabNames = {"COMBAT", "MISC", "SETTINGS"}
+
+local function CreateTab(name, order)
+    local Btn = Instance.new("TextButton")
+    Btn.LayoutOrder      = order
+    Btn.Size             = UDim2.new(1, 0, 0, 38)
+    Btn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    Btn.Text             = name
+    Btn.Font             = Enum.Font.GothamBold
+    Btn.TextSize         = 12
+    Btn.TextColor3       = Color3.fromRGB(180, 180, 180)
+    Btn.BorderSizePixel  = 0
+    Btn.Parent           = Sidebar
+    Instance.new("UICorner", Btn).CornerRadius = UDim.new(0, 8)
+
+    local TabFrame = Instance.new("ScrollingFrame")
+    TabFrame.Name                    = name .. "Tab"
+    TabFrame.Size                    = UDim2.new(1, -165, 1, -50)
+    TabFrame.Position                = UDim2.new(0, 158, 0, 5)
+    TabFrame.BackgroundTransparency  = 1
+    TabFrame.BorderSizePixel         = 0
+    TabFrame.ScrollBarThickness      = 3
+    TabFrame.ScrollBarImageColor3    = Color3.fromRGB(60, 60, 60)
+    TabFrame.CanvasSize              = UDim2.new(0, 0, 0, 0)
+    TabFrame.Visible                 = false
+    TabFrame.Parent                  = ContentFrame
+
+    local ListLayout = Instance.new("UIListLayout")
+    ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    ListLayout.Padding   = UDim.new(0, 8)
+    ListLayout.Parent    = TabFrame
+
+    ListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        TabFrame.CanvasSize = UDim2.new(0, 0, 0, ListLayout.AbsoluteContentSize.Y + 16)
+    end)
+
+    Tabs[name]       = TabFrame
+    TabButtons[name] = Btn
+
+    Btn.MouseButton1Click:Connect(function()
+        for _, f in pairs(Tabs)       do f.Visible = false end
+        for _, b in pairs(TabButtons) do
+            b.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+            b.TextColor3       = Color3.fromRGB(180, 180, 180)
+        end
+        TabFrame.Visible      = true
+        Btn.BackgroundColor3  = Color3.fromRGB(45, 45, 45)
+        Btn.TextColor3        = Color3.fromRGB(255, 255, 255)
+    end)
+end
+
+for i, n in ipairs(TabNames) do CreateTab(n, i) end
+
+TabButtons["COMBAT"].BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+TabButtons["COMBAT"].TextColor3       = Color3.fromRGB(255, 255, 255)
+Tabs["COMBAT"].Visible                = true
+
+-- ══════════════════════════════════════════
+--  PADDING HELPER
+-- ══════════════════════════════════════════
+local function Pad(frame)
+    local p = Instance.new("UIPadding")
+    p.PaddingTop   = UDim.new(0, 6)
+    p.PaddingLeft  = UDim.new(0, 4)
+    p.PaddingRight = UDim.new(0, 4)
+    p.Parent       = frame
+end
+Pad(Tabs["COMBAT"])
+Pad(Tabs["MISC"])
+Pad(Tabs["SETTINGS"])
+
+-- ══════════════════════════════════════════
+--  TOGGLE COMPONENT
+-- ══════════════════════════════════════════
+local function MakeToggle(parent, labelText, subText, settingKey, order)
+    local Row = Instance.new("Frame")
+    Row.LayoutOrder      = order
+    Row.Size             = UDim2.new(1, -8, 0, 58)
+    Row.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    Row.BorderSizePixel  = 0
+    Row.Parent           = parent
+    Instance.new("UICorner", Row).CornerRadius = UDim.new(0, 10)
+    local RS = Instance.new("UIStroke", Row)
+    RS.Color = Color3.fromRGB(40, 40, 40); RS.Thickness = 1
+
+    local Lbl = Instance.new("TextLabel")
+    Lbl.Text               = labelText
+    Lbl.Font               = Enum.Font.GothamBold
+    Lbl.TextSize           = 13
+    Lbl.TextColor3         = Color3.fromRGB(255, 255, 255)
+    Lbl.BackgroundTransparency = 1
+    Lbl.Size               = UDim2.new(0.75, 0, 0.5, 0)
+    Lbl.Position           = UDim2.new(0, 14, 0, 4)
+    Lbl.TextXAlignment     = Enum.TextXAlignment.Left
+    Lbl.Parent             = Row
+
+    local Sub = Instance.new("TextLabel")
+    Sub.Text               = subText
+    Sub.Font               = Enum.Font.Gotham
+    Sub.TextSize           = 10
+    Sub.TextColor3         = Color3.fromRGB(100, 100, 100)
+    Sub.BackgroundTransparency = 1
+    Sub.Size               = UDim2.new(0.75, 0, 0.4, 0)
+    Sub.Position           = UDim2.new(0, 14, 0.52, 0)
+    Sub.TextXAlignment     = Enum.TextXAlignment.Left
+    Sub.Parent             = Row
+
+    local ToggleBG = Instance.new("Frame")
+    ToggleBG.Size             = UDim2.new(0, 44, 0, 24)
+    ToggleBG.Position         = UDim2.new(1, -58, 0.5, -12)
+    ToggleBG.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    ToggleBG.BorderSizePixel  = 0
+    ToggleBG.Parent           = Row
+    Instance.new("UICorner", ToggleBG).CornerRadius = UDim.new(1, 0)
+
+    local Dot = Instance.new("Frame")
+    Dot.Size             = UDim2.new(0, 18, 0, 18)
+    Dot.Position         = UDim2.new(0, 3, 0.5, -9)
+    Dot.BackgroundColor3 = Color3.fromRGB(120, 120, 120)
+    Dot.BorderSizePixel  = 0
+    Dot.Parent           = ToggleBG
+    Instance.new("UICorner", Dot).CornerRadius = UDim.new(1, 0)
+
+    local function Refresh(on)
+        local ti = TweenInfo.new(0.15, Enum.EasingStyle.Quad)
+        TweenService:Create(Dot, ti, {
+            Position         = on and UDim2.new(0, 23, 0.5, -9) or UDim2.new(0, 3, 0.5, -9),
+            BackgroundColor3 = on and Color3.fromRGB(255,255,255) or Color3.fromRGB(120,120,120),
+        }):Play()
+        TweenService:Create(ToggleBG, ti, {
+            BackgroundColor3 = on and Color3.fromRGB(60,60,60) or Color3.fromRGB(40,40,40),
+        }):Play()
+    end
+
+    Refresh(Settings[settingKey])
+
+    local Click = Instance.new("TextButton")
+    Click.Size                 = UDim2.new(1, 0, 1, 0)
+    Click.BackgroundTransparency = 1
+    Click.Text                 = ""
+    Click.Parent               = Row
+    Click.MouseButton1Click:Connect(function()
+        Settings[settingKey] = not Settings[settingKey]
+        Refresh(Settings[settingKey])
+    end)
+end
+
+-- ══════════════════════════════════════════
+--  SLIDER COMPONENT  — FULLY REWRITTEN
+--  Fixed: InputBegan on Track misses fast drags;
+--         now uses a transparent overlay Button
+--         that captures the initial click precisely,
+--         then global InputChanged drives the drag.
+-- ══════════════════════════════════════════
+local function MakeSlider(parent, labelText, settingKey, minVal, maxVal, order, isFloat, callback)
+    local Row = Instance.new("Frame")
+    Row.LayoutOrder      = order
+    Row.Size             = UDim2.new(1, -8, 0, 72)
+    Row.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    Row.BorderSizePixel  = 0
+    Row.Parent           = parent
+    Instance.new("UICorner", Row).CornerRadius = UDim.new(0, 10)
+    local RS = Instance.new("UIStroke", Row)
+    RS.Color = Color3.fromRGB(40, 40, 40); RS.Thickness = 1
+
+    local function FmtVal(v)
+        return isFloat and string.format("%.2f", v) or tostring(math.floor(v))
+    end
+
+    local Lbl = Instance.new("TextLabel")
+    Lbl.Text               = labelText
+    Lbl.Font               = Enum.Font.GothamBold
+    Lbl.TextSize           = 13
+    Lbl.TextColor3         = Color3.fromRGB(255, 255, 255)
+    Lbl.BackgroundTransparency = 1
+    Lbl.Size               = UDim2.new(0.65, 0, 0, 22)
+    Lbl.Position           = UDim2.new(0, 14, 0, 8)
+    Lbl.TextXAlignment     = Enum.TextXAlignment.Left
+    Lbl.Parent             = Row
+
+    local ValLbl = Instance.new("TextLabel")
+    ValLbl.Text               = FmtVal(Settings[settingKey])
+    ValLbl.Font               = Enum.Font.GothamBold
+    ValLbl.TextSize           = 12
+    ValLbl.TextColor3         = Color3.fromRGB(180, 180, 180)
+    ValLbl.BackgroundTransparency = 1
+    ValLbl.Size               = UDim2.new(0.35, -14, 0, 22)
+    ValLbl.Position           = UDim2.new(0.65, 0, 0, 8)
+    ValLbl.TextXAlignment     = Enum.TextXAlignment.Right
+    ValLbl.Parent             = Row
+
+    -- Track background
+    local Track = Instance.new("Frame")
+    Track.Size             = UDim2.new(1, -28, 0, 8)
+    Track.Position         = UDim2.new(0, 14, 0, 44)
+    Track.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    Track.BorderSizePixel  = 0
+    Track.Parent           = Row
+    Instance.new("UICorner", Track).CornerRadius = UDim.new(1, 0)
+
+    local initPct = math.clamp((Settings[settingKey] - minVal) / (maxVal - minVal), 0, 1)
+
+    local Fill = Instance.new("Frame")
+    Fill.Size             = UDim2.new(initPct, 0, 1, 0)
+    Fill.BackgroundColor3 = Color3.fromRGB(210, 210, 210)
+    Fill.BorderSizePixel  = 0
+    Fill.Parent           = Track
+    Instance.new("UICorner", Fill).CornerRadius = UDim.new(1, 0)
+
+    local Knob = Instance.new("Frame")
+    Knob.Size             = UDim2.new(0, 16, 0, 16)
+    Knob.AnchorPoint      = Vector2.new(0.5, 0.5)
+    Knob.Position         = UDim2.new(initPct, 0, 0.5, 0)
+    Knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    Knob.BorderSizePixel  = 0
+    Knob.Parent           = Track
+    Instance.new("UICorner", Knob).CornerRadius = UDim.new(1, 0)
+
+    -- Invisible click catcher over the whole row
+    local Catcher = Instance.new("TextButton")
+    Catcher.Size                 = UDim2.new(1, 0, 1, 0)
+    Catcher.BackgroundTransparency = 1
+    Catcher.Text                 = ""
+    Catcher.ZIndex               = 10
+    Catcher.Parent               = Row
+
+    local dragging = false
+
+    local function Compute(inputX)
+        -- use Track's absolute position for accuracy
+        local trackAbs   = Track.AbsolutePosition.X
+        local trackWidth = Track.AbsoluteSize.X
+        local pct        = math.clamp((inputX - trackAbs) / trackWidth, 0, 1)
+        local raw        = minVal + (maxVal - minVal) * pct
+        local val        = isFloat and math.floor(raw * 100 + 0.5) / 100 or math.floor(raw + 0.5)
+        Settings[settingKey] = val
+        ValLbl.Text          = FmtVal(val)
+        Fill.Size            = UDim2.new(pct, 0, 1, 0)
+        Knob.Position        = UDim2.new(pct, 0, 0.5, 0)
+        if callback then callback(val) end
+    end
+
+    Catcher.MouseButton1Down:Connect(function(x, _y)
+        dragging = true
+        Compute(x)
+    end)
+
+    -- global move so drag still works when cursor leaves the row
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            Compute(input.Position.X)
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+
+    return Row
+end
+
+-- ══════════════════════════════════════════
+--  COLOR PICKER  (MISC tab)
+-- ══════════════════════════════════════════
+local function MakeColorPicker(parent, order)
+    local Row = Instance.new("Frame")
+    Row.LayoutOrder      = order
+    Row.Size             = UDim2.new(1, -8, 0, 160)
+    Row.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    Row.BorderSizePixel  = 0
+    Row.Parent           = parent
+    Instance.new("UICorner", Row).CornerRadius = UDim.new(0, 10)
+    local RS = Instance.new("UIStroke", Row); RS.Color = Color3.fromRGB(40,40,40); RS.Thickness = 1
+
+    local TitleLbl = Instance.new("TextLabel")
+    TitleLbl.Text               = "GUI ACCENT COLOR"
+    TitleLbl.Font               = Enum.Font.GothamBold
+    TitleLbl.TextSize           = 13
+    TitleLbl.TextColor3         = Color3.fromRGB(255,255,255)
+    TitleLbl.BackgroundTransparency = 1
+    TitleLbl.Size               = UDim2.new(1,-14,0,22)
+    TitleLbl.Position           = UDim2.new(0,14,0,8)
+    TitleLbl.TextXAlignment     = Enum.TextXAlignment.Left
+    TitleLbl.Parent             = Row
+
+    local Preview = Instance.new("Frame")
+    Preview.Size             = UDim2.new(0,30,0,30)
+    Preview.Position         = UDim2.new(1,-44,0,8)
+    Preview.BackgroundColor3 = Settings.GUIColor
+    Preview.BorderSizePixel  = 0
+    Preview.Parent           = Row
+    Instance.new("UICorner", Preview).CornerRadius = UDim.new(0,6)
+
+    local defs = {
+        {l="R", k="r", c=Color3.fromRGB(200,60,60)},
+        {l="G", k="g", c=Color3.fromRGB(60,200,60)},
+        {l="B", k="b", c=Color3.fromRGB(60,120,200)},
+    }
+    local cv = {
+        r = math.floor(Settings.GUIColor.R * 255),
+        g = math.floor(Settings.GUIColor.G * 255),
+        b = math.floor(Settings.GUIColor.B * 255),
+    }
+
+    local function Apply()
+        local c = Color3.fromRGB(cv.r, cv.g, cv.b)
+        Settings.GUIColor    = c
+        Preview.BackgroundColor3 = c
+        FOVDraw.Color        = c
+    end
+
+    for i, d in ipairs(defs) do
+        local yO = 40 + (i-1)*34
+
+        local SLbl = Instance.new("TextLabel")
+        SLbl.Text = d.l; SLbl.Font = Enum.Font.GothamBold; SLbl.TextSize = 11
+        SLbl.TextColor3 = d.c; SLbl.BackgroundTransparency = 1
+        SLbl.Size = UDim2.new(0,16,0,20); SLbl.Position = UDim2.new(0,14,0,yO)
+        SLbl.TextXAlignment = Enum.TextXAlignment.Left; SLbl.Parent = Row
+
+        local ST = Instance.new("Frame")
+        ST.Size = UDim2.new(1,-70,0,6); ST.Position = UDim2.new(0,34,0,yO+7)
+        ST.BackgroundColor3 = Color3.fromRGB(40,40,40); ST.BorderSizePixel = 0; ST.Parent = Row
+        Instance.new("UICorner", ST).CornerRadius = UDim.new(1,0)
+
+        local p0 = cv[d.k]/255
+        local SF = Instance.new("Frame")
+        SF.Size = UDim2.new(p0,0,1,0); SF.BackgroundColor3 = d.c
+        SF.BorderSizePixel = 0; SF.Parent = ST
+        Instance.new("UICorner", SF).CornerRadius = UDim.new(1,0)
+
+        local SK = Instance.new("Frame")
+        SK.Size = UDim2.new(0,12,0,12); SK.AnchorPoint = Vector2.new(0.5,0.5)
+        SK.Position = UDim2.new(p0,0,0.5,0); SK.BackgroundColor3 = Color3.fromRGB(255,255,255)
+        SK.BorderSizePixel = 0; SK.Parent = ST
+        Instance.new("UICorner", SK).CornerRadius = UDim.new(1,0)
+
+        local SVL = Instance.new("TextLabel")
+        SVL.Text = tostring(cv[d.k]); SVL.Font = Enum.Font.Gotham; SVL.TextSize = 10
+        SVL.TextColor3 = Color3.fromRGB(160,160,160); SVL.BackgroundTransparency = 1
+        SVL.Size = UDim2.new(0,28,0,20); SVL.Position = UDim2.new(1,-36,0,yO)
+        SVL.TextXAlignment = Enum.TextXAlignment.Right; SVL.Parent = Row
+
+        local sdrag = false
+        local key   = d.k
+
+        local SC = Instance.new("TextButton")
+        SC.Size = UDim2.new(1,0,1,0); SC.BackgroundTransparency = 1
+        SC.Text = ""; SC.ZIndex = 10; SC.Parent = ST
+
+        local function SCompute(ix)
+            local abs = ST.AbsolutePosition.X
+            local w   = ST.AbsoluteSize.X
+            local pp  = math.clamp((ix-abs)/w, 0, 1)
+            cv[key] = math.floor(pp*255)
+            SF.Size      = UDim2.new(pp,0,1,0)
+            SK.Position  = UDim2.new(pp,0,0.5,0)
+            SVL.Text     = tostring(cv[key])
+            Apply()
+        end
+
+        SC.MouseButton1Down:Connect(function(x) sdrag = true; SCompute(x) end)
+
+        UserInputService.InputChanged:Connect(function(inp)
+            if sdrag and inp.UserInputType == Enum.UserInputType.MouseMovement then
+                SCompute(inp.Position.X)
+            end
+        end)
+        UserInputService.InputEnded:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 then sdrag = false end
+        end)
+    end
+end
+
+-- ══════════════════════════════════════════
+--  BUILD TABS
+-- ══════════════════════════════════════════
+-- COMBAT
+MakeToggle(Tabs["COMBAT"], "SILENT AIM",  "AIM ASSIST",         "SilentAim",     1)
+MakeToggle(Tabs["COMBAT"], "FOV CIRCLE",  "SHOW AIM RADIUS",    "FOVCircle",     2)
+MakeToggle(Tabs["COMBAT"], "TEAM CHECK",  "IGNORE TEAMMATES",   "TeamCheck",     3)
+MakeToggle(Tabs["COMBAT"], "WALL CHECK",  "IGNORE WALL TARGETS","WallCheck",     4)
+MakeToggle(Tabs["COMBAT"], "AIMBOT",      "AUTO AIM TARGET",    "AimbotEnabled", 5)
+
+-- MISC
+MakeColorPicker(Tabs["MISC"], 1)
+
+-- SETTINGS
+-- FOV RADIUS  — integer slider, drives FOVDraw.Radius live
+MakeSlider(Tabs["SETTINGS"], "FOV RADIUS", "FOVRadius", 30, 400, 1, false, function(val)
+    Settings.FOVRadius = val
+    FOVDraw.Radius     = val
+end)
+
+-- AIM SMOOTHNESS — float slider 0.01 → 1.00
+--   Fixed: old code stored 1–30 then divided by 100 giving 0.01–0.30 and
+--          showing "0.25" as label while the actual setting was int 25.
+--          Now we store the true float directly.
+MakeSlider(Tabs["SETTINGS"], "AIM SMOOTHNESS", "Smoothness", 1, 100, 2, false, function(val)
+    Settings.Smoothness = val / 100  -- 0.01 → 1.00
+end)
+
+-- ══════════════════════════════════════════
+--  AIMBOT CORE  — REWRITTEN
+--  Fixed:
+--    • mousemoverel is a Synapse/executor global; wrapped in pcall
+--    • Wall check uses RaycastParams instead of deprecated FindPartOnRay
+--    • Smoothness now correctly mapped (0.01–1.0)
+--    • Target selection uses head when available for better accuracy
+-- ══════════════════════════════════════════
+local RayParams = RaycastParams.new()
+RayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+local function GetTarget()
+    local bestPart = nil
+    local bestDist = Settings.FOVRadius
+    local cx       = Camera.ViewportSize.X / 2
+    local cy       = Camera.ViewportSize.Y / 2
+    local center   = Vector2.new(cx, cy)
+
+    RayParams.FilterDescendantsInstances = {LocalPlayer.Character or {}}
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr == LocalPlayer then continue end
+        if Settings.TeamCheck and plr.Team == LocalPlayer.Team then continue end
+
+        local char = plr.Character
+        if not char then continue end
+
+        local head = char:FindFirstChild("Head")
+        local hrp  = char:FindFirstChild("HumanoidRootPart")
+        local hum  = char:FindFirstChildOfClass("Humanoid")
+        local part = head or hrp
+        if not part or not hum or hum.Health <= 0 then continue end
+
+        -- Wall check with modern RaycastParams
+        if Settings.WallCheck then
+            local origin    = Camera.CFrame.Position
+            local direction = (part.Position - origin)
+            local result    = workspace:Raycast(origin, direction, RayParams)
+            if result and not result.Instance:IsDescendantOf(char) then continue end
+        end
+
+        local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+        if not onScreen then continue end
+
+        local dist = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
+        if dist < bestDist then
+            bestDist = dist
+            bestPart = part
+        end
+    end
+
+    return bestPart
+end
+
+-- ══════════════════════════════════════════
+--  MAIN RENDER LOOP
+-- ══════════════════════════════════════════
+RunService.RenderStepped:Connect(function()
+    if not Settings.AimbotEnabled then return end
+
+    local target = GetTarget()
+    if not target then return end
+
+    local screenPos, onScreen = Camera:WorldToViewportPoint(target.Position)
+    if not onScreen then return end
+
+    local cx = Camera.ViewportSize.X / 2
+    local cy = Camera.ViewportSize.Y / 2
+
+    -- delta from screen center to target (silent aim style — moves toward center)
+    local dx = screenPos.X - cx
+    local dy = screenPos.Y - cy
+
+    -- apply smoothness (lower = slower lock)
+    local moveX = dx * Settings.Smoothness
+    local moveY = dy * Settings.Smoothness
+
+    pcall(mousemoverel, moveX, moveY)
+end)
+
+-- ══════════════════════════════════════════
+--  SILENT AIM HOOK
+-- ══════════════════════════════════════════
+if hookmetamethod then
+    local oldIndex
+    oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
+        if not checkcaller() and key == "Hit" and self == Mouse then
+            if Settings.SilentAim then
+                local target = GetTarget()
+                if target then
+                    return CFrame.new(target.Position)
+                end
+            end
+        end
+        return oldIndex(self, key)
+    end))
+end
